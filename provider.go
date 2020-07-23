@@ -2,30 +2,33 @@ package cerk
 
 import (
 	"fmt"
+	"log"
 	"math/rand"
 	"os"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	goeh "github.com/hetacode/go-eh"
 )
 
 // Provider interface
 type Provider interface {
-	FetchAllEvents(batch int) (<-chan []Event, error)
-	SendEvents(events []Event) error
+	FetchAllEvents(batch int) (<-chan []goeh.Event, error)
+	SendEvents(events []goeh.Event) error
 	Close()
 }
 
 // KafkaProvider implemented provider for kafka
 type KafkaProvider struct {
-	topic     string
-	servers   string
-	groupName string
-	consumer  *kafka.Producer
+	topic        string
+	servers      string
+	groupName    string
+	consumer     *kafka.Producer
+	eventsMapper *goeh.EventsMapper
 }
 
 // FetchAllEvents get all events from all partitions from specified topic
-func (p *KafkaProvider) FetchAllEvents(batch int) (<-chan []Event, error) {
+func (p *KafkaProvider) FetchAllEvents(batch int) (<-chan []goeh.Event, error) {
 	rand.Seed(time.Now().UTC().UnixNano())
 
 	c, err := kafka.NewConsumer(&kafka.ConfigMap{
@@ -52,7 +55,7 @@ func (p *KafkaProvider) FetchAllEvents(batch int) (<-chan []Event, error) {
 
 	c.SubscribeTopics([]string{p.topic}, nil)
 
-	eventsChan := make(chan []Event)
+	eventsChan := make(chan []goeh.Event)
 
 	go func() {
 		defer c.Close()
@@ -60,21 +63,23 @@ func (p *KafkaProvider) FetchAllEvents(batch int) (<-chan []Event, error) {
 
 		run := true
 		currentMessageNo := 0
-		events := make([]Event, 0)
+		events := make([]goeh.Event, 0)
 		for run == true {
 			ev := c.Poll(0)
 			switch e := ev.(type) {
 			case *kafka.Message:
-				event := new(GenericEvent)
-				event.AggregatorId = string(e.Key)
-				event.Payload = string(e.Value)
+				event, err := p.eventsMapper.Resolve(string(e.Value))
+				if err != nil {
+					log.Printf("cannot resolve event: %s| Err: %s", string(e.Value), err)
+					continue
+				}
 
 				events = append(events, event)
 				currentMessageNo++
 
 				if currentMessageNo >= batch {
 					eventsChan <- events
-					events = make([]Event, 0)
+					events = make([]goeh.Event, 0)
 					currentMessageNo = 0
 				}
 
@@ -102,10 +107,11 @@ func (p *KafkaProvider) FetchAllEvents(batch int) (<-chan []Event, error) {
 }
 
 // SendEvents put messages on kafka topic
-func (p *KafkaProvider) SendEvents(events []Event) error {
+func (p *KafkaProvider) SendEvents(events []goeh.Event) error {
 	for _, e := range events {
+		e.SavePayload(e)
 		message := kafka.Message{
-			Key:            []byte(e.GetAggregatorId()),
+			Key:            []byte(e.GetID()),
 			TopicPartition: kafka.TopicPartition{Topic: &p.topic, Partition: kafka.PartitionAny},
 			Value:          []byte(e.GetPayload()),
 		}
@@ -126,11 +132,12 @@ func (p *KafkaProvider) Close() {
 }
 
 // NewKafkaProvider create new instance of provider
-func NewKafkaProvider(topic string, groupName string, servers string) Provider {
+func NewKafkaProvider(topic string, groupName string, servers string, eventsMapper *goeh.EventsMapper) Provider {
 	provider := new(KafkaProvider)
 	provider.servers = servers
 	provider.topic = topic
 	provider.groupName = groupName
+	provider.eventsMapper = eventsMapper
 
 	pr, err := kafka.NewProducer(&kafka.ConfigMap{"bootstrap.servers": provider.servers})
 
