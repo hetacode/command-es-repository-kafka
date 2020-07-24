@@ -1,23 +1,27 @@
 package cerk
 
-import "fmt"
+import (
+	"fmt"
+
+	goeh "github.com/hetacode/go-eh"
+)
 
 // Repository it's an abstraction for database which keeps all entities (aggregators) in theirs last state
 type Repository interface {
 	InitProvider(provider Provider, child Repository) error // ??
 	AddOrModifyEntity(entity Entity)
 	GetEntity(id string) (Entity, error)
-	Replay(events []Event) error
-	AddNewEvent(event Event)
-	GetUncommitedChanges() []Event
-	Save(events []Event) error
+	Replay(events []goeh.Event) error
+	AddNewEvent(event goeh.Event)
+	GetUncommitedChanges() []goeh.Event
+	Save(events []goeh.Event) error
 }
 
 // MemoryRepository is an basic implementation of Repository which keep data in the memory. This struct waiting for inheritance by own Repository.
 // Inherited implementation should contains special methods for each needed case of event type
 type MemoryRepository struct {
 	entities       map[string]Entity
-	eventsToCommit []Event
+	eventsToCommit []goeh.Event
 	provider       Provider
 }
 
@@ -54,26 +58,26 @@ func (r *MemoryRepository) GetEntity(id string) (Entity, error) {
 
 // Replay method update state of entity/ies by provided events.
 // This method should be override by true implementation with update cases for each event type
-func (r *MemoryRepository) Replay(events []Event) error {
+func (r *MemoryRepository) Replay(events []goeh.Event) error {
 	return fmt.Errorf("Please implement this method in ith own way")
 }
 
 // AddNewEvent set newly created event to uncommitted list of events
-func (r *MemoryRepository) AddNewEvent(event Event) {
+func (r *MemoryRepository) AddNewEvent(event goeh.Event) {
 	r.eventsToCommit = append(r.eventsToCommit, event)
 }
 
 // GetUncommitedChanges get new events which were created by changes methods
-func (r *MemoryRepository) GetUncommitedChanges() []Event {
+func (r *MemoryRepository) GetUncommitedChanges() []goeh.Event {
 	return r.eventsToCommit
 }
 
 // Save events - so to be honest, just send events to bus provider
-func (r *MemoryRepository) Save(events []Event) error {
+func (r *MemoryRepository) Save(events []goeh.Event) error {
 	if err := r.provider.SendEvents(events); err != nil {
 		return err
 	}
-	r.eventsToCommit = make([]Event, 0)
+	r.eventsToCommit = make([]goeh.Event, 0)
 
 	return nil
 }
@@ -82,7 +86,7 @@ func (r *MemoryRepository) Save(events []Event) error {
 func NewMemoryRepository() *MemoryRepository {
 	repository := new(MemoryRepository)
 	repository.entities = make(map[string]Entity)
-	repository.eventsToCommit = make([]Event, 0)
+	repository.eventsToCommit = make([]goeh.Event, 0)
 
 	return repository
 }

@@ -1,22 +1,25 @@
 package examplecommandhandlers
 
 import (
-	cerk "github.com/hetacode/command-es-repository-kafka"
 	examplecommands "github.com/hetacode/command-es-repository-kafka/examples/simple-cqrs-writer/commands"
 	examplerepository "github.com/hetacode/command-es-repository-kafka/examples/simple-cqrs-writer/repository"
+	goeh "github.com/hetacode/go-eh"
 )
 
-func CreateUserCommandHandler(repository *examplerepository.UsersRepository, command *examplecommands.CreateUserCommand) error {
-	event, err := repository.Create(command.FirstName, command.LastName)
-	if err != nil {
-		return err
-	}
-	if err := repository.Replay([]cerk.Event{event}); err != nil {
-		return err
-	}
-	if err := repository.Save([]cerk.Event{event}); err != nil {
-		return err
-	}
+type CreateUserCommandHandler struct {
+	Repository *examplerepository.UsersRepository
+}
 
-	return nil
+func (c *CreateUserCommandHandler) Handle(event goeh.Event) {
+	command := event.(*examplecommands.CreateUserCommand)
+	event, err := c.Repository.Create(command.FirstName, command.LastName)
+	if err != nil {
+		panic(err)
+	}
+	if err := c.Repository.Replay([]goeh.Event{event}); err != nil {
+		panic(err)
+	}
+	if err := c.Repository.Save([]goeh.Event{event}); err != nil {
+		panic(err)
+	}
 }

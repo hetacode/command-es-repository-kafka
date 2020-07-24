@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -10,10 +9,12 @@ import (
 	examplecommandhandlers "github.com/hetacode/command-es-repository-kafka/examples/simple-cqrs-writer/command_handlers"
 	examplecommands "github.com/hetacode/command-es-repository-kafka/examples/simple-cqrs-writer/commands"
 	examplerepository "github.com/hetacode/command-es-repository-kafka/examples/simple-cqrs-writer/repository"
+	goeh "github.com/hetacode/go-eh"
 )
 
 type MainContainer struct {
-	repository *examplerepository.UsersRepository
+	EventsMapper         *goeh.EventsMapper
+	EventsHandlerManager *goeh.EventsHandlerManager
 }
 
 func (h *MainContainer) handler(res http.ResponseWriter, req *http.Request) {
@@ -25,45 +26,27 @@ func (h *MainContainer) handler(res http.ResponseWriter, req *http.Request) {
 		}
 		log.Printf("Received commmand: %s", string(body))
 
-		var jsonMap map[string]interface{}
-		jsonData := body
-
-		if err := json.Unmarshal(jsonData, &jsonMap); err != nil {
+		event, err := h.EventsMapper.Resolve(string(body))
+		if err != nil {
 			log.Panic(err)
 			res.WriteHeader(400)
 		}
-
-		// commands actions
-		switch jsonMap["type"] {
-		case "CreateUserCommand":
-			var command *examplecommands.CreateUserCommand
-			if err := json.Unmarshal(jsonData, &command); err != nil {
-				log.Panic(err)
-				res.WriteHeader(400)
-			}
-
-			if err := examplecommandhandlers.CreateUserCommandHandler(h.repository, command); err != nil {
-				log.Panic(err)
-				res.WriteHeader(400)
-			}
-
-		case "UpdateUserCommand":
-			var command *examplecommands.UpdateUserCommand
-			if err := json.Unmarshal(jsonData, &command); err != nil {
-				log.Panic(err)
-				res.WriteHeader(400)
-			}
-
-			if err := examplecommandhandlers.UpdateUserCommandHandler(h.repository, command); err != nil {
-				log.Panic(err)
-				res.WriteHeader(400)
-			}
+		err = h.EventsHandlerManager.Execute(event)
+		if err != nil {
+			log.Panic(err)
+			res.WriteHeader(400)
 		}
 	}
 }
 
 func main() {
-	provider := cerk.NewKafkaProvider("example-topic", "example-app-group", "192.168.1.151:9092")
+	eventsMapper := new(goeh.EventsMapper)
+	eventsMapper.Register(new(examplecommands.CreateUserCommand))
+	eventsMapper.Register(new(examplecommands.UpdateUserCommand))
+
+	eventManager := new(goeh.EventsHandlerManager)
+
+	provider := cerk.NewKafkaProvider("example-topic", "example-app-group", "192.168.1.151:9092", eventsMapper)
 	defer provider.Close()
 
 	repository := new(examplerepository.UsersRepository)
@@ -72,8 +55,12 @@ func main() {
 		panic(err)
 	}
 
+	eventManager.Register(new(examplecommands.CreateUserCommand), &examplecommandhandlers.CreateUserCommandHandler{Repository: repository})
+	eventManager.Register(new(examplecommands.UpdateUserCommand), &examplecommandhandlers.UpdateUserCommandHandler{Repository: repository})
+
 	h := &MainContainer{
-		repository: repository,
+		EventsMapper:         eventsMapper,
+		EventsHandlerManager: eventManager,
 	}
 
 	http.HandleFunc("/", h.handler)

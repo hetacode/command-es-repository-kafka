@@ -5,10 +5,13 @@ import (
 	"fmt"
 
 	cerk "github.com/hetacode/command-es-repository-kafka"
+	goeh "github.com/hetacode/go-eh"
 )
 
 func fetch(server string, topic string, group string) {
-	provider := cerk.NewKafkaProvider(topic, group, server)
+	eventsMapper := new(goeh.EventsMapper)
+
+	provider := cerk.NewKafkaProvider(topic, group, server, eventsMapper)
 	eventsBatch, err := provider.FetchAllEvents(10)
 
 	if err != nil {
@@ -17,21 +20,22 @@ func fetch(server string, topic string, group string) {
 
 	for events := range eventsBatch {
 		for _, event := range events {
-			fmt.Printf("%s: %s\n", event.GetAggregatorId(), event.GetPayload())
+			fmt.Printf("%s: %s\n", event.GetID(), event.GetPayload())
 		}
 	}
 }
 
 func fill(server string, topic string, group string) {
-	events := make([]cerk.Event, 0)
-	provider := cerk.NewKafkaProvider(topic, group, server)
+	eventsMapper := new(goeh.EventsMapper)
+
+	events := make([]goeh.Event, 0)
+	provider := cerk.NewKafkaProvider(topic, group, server, eventsMapper)
 
 	i := 0
 	for i < 100 {
-		event := new(cerk.GenericEvent)
-		event.AggregatorId = fmt.Sprintf("%d", i)
-		event.Type = "GenericEvent"
-		event.Payload = fmt.Sprintf(`{"type": "GenericEvent", "createTime":"2009-11-10T23:00:00Z", "version":1, "id": "%d"}`, i)
+		event := &goeh.EventData{
+			Payload: fmt.Sprintf(`{"type": "GenericEvent", "createTime":"2009-11-10T23:00:00Z", "version":1, "id": "%d"}`, i),
+		}
 		events = append(events, event)
 
 		i++
