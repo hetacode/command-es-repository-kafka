@@ -5,13 +5,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-playground/assert"
 	cerk "github.com/hetacode/command-es-repository-kafka"
+	goeh "github.com/hetacode/go-eh"
 )
+
+var eventsMapper *goeh.EventsMapper
 
 func Test_Replay_Method_For_MemoryRepository_Should_Be_Override(t *testing.T) {
 	repository := new(cerk.MemoryRepository)
 
-	err := repository.Replay(make([]cerk.Event, 0))
+	err := repository.Replay(make([]goeh.Event, 0))
 	if err == nil {
 		t.Error("Error shouldn't be null")
 	}
@@ -22,32 +26,38 @@ func Test_Replay_Method_For_MemoryRepository_Should_Be_Override(t *testing.T) {
 }
 
 func Test_Event_LoadPayload(t *testing.T) {
-	event := &EntityCreatedEvent{
-		AggregatorId: "1",
-		Version:      1,
-		Payload:      `{"message":"Just test", "createTime":"2009-11-10T23:00:00Z"}`,
-	}
-	if err := event.LoadPayload(); err != nil {
-		t.Fatal(err.Error())
+	eventsMapper := new(goeh.EventsMapper)
+	eventsMapper.Register(new(EntityCreatedEvent))
+
+	e, err := eventsMapper.Resolve(`{"message":"Just test", "createTime":"2009-11-10T23:00:00Z", "id": "1", "type": "EntityCreatedEvent"}`)
+
+	if err != nil {
+		t.Fatal(err)
 	}
 
+	event := e.(*EntityCreatedEvent)
 	if event.Message != "Just test" {
 		t.Fatalf("Wrong Message %s", event.Message)
 	}
 
-	if event.GetCreateTime().Year() != 2009 {
-		t.Fatalf("Wrong CreateTime %s", event.GetCreateTime().Local().String())
+	date, err := time.Parse(time.RFC3339, event.CreateTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if date.Year() != 2009 {
+		t.Fatalf("Wrong CreateTime %s", event.CreateTime)
 	}
 }
 
 func Test_Event_SavePayload(t *testing.T) {
 	event := &EntityCreatedEvent{
-		AggregatorId: "1",
-		Version:      1,
-		Message:      "It's just a test",
-		CreateTime:   time.Now().String(),
+		EventData:  goeh.EventData{ID: "1"},
+		Version:    1,
+		Message:    "It's just a test",
+		CreateTime: time.Now().String(),
 	}
-	if err := event.SavePayload(); err != nil {
+	if err := event.SavePayload(event); err != nil {
 		t.Fatal(err.Error())
 	}
 
@@ -55,23 +65,23 @@ func Test_Event_SavePayload(t *testing.T) {
 		t.Fatal("Payload is empty")
 	}
 
-	if !strings.HasPrefix(event.Payload, `{"createTime":`) {
+	if !strings.Contains(event.Payload, `"createTime":`) {
 		t.Fatalf("Wrong payload - %s", event.Payload)
 	}
 }
 
 func Test_Replay_Function_In_MockRepository(t *testing.T) {
 	event := &EntityCreatedEvent{
-		AggregatorId: "1",
-		Version:      1,
-		Message:      "It's just a test",
-		CreateTime:   time.Now().String(),
+		EventData:  goeh.EventData{ID: "1"},
+		Version:    1,
+		Message:    "It's just a test",
+		CreateTime: time.Now().String(),
 	}
 
 	repository := new(MockRepository)
 	repository.MemoryRepository = cerk.NewMemoryRepository()
 
-	events := []cerk.Event{event}
+	events := []goeh.Event{event}
 	if err := repository.Replay(events); err != nil {
 		t.Fatal(err.Error())
 	}
@@ -91,13 +101,14 @@ func Test_Replay_Function_In_MockRepository(t *testing.T) {
 }
 
 func Test_InitProvider_And_Check_Generated_Entity(t *testing.T) {
-	event := &EntityCreatedEvent{
-		AggregatorId: "1",
-		Version:      1,
-		Payload:      `{"message":"Just test", "createTime":"2009-11-10T23:00:00Z"}`,
-	}
+	eventsMapper := new(goeh.EventsMapper)
+	eventsMapper.Register(new(EntityCreatedEvent))
+
+	e, err := eventsMapper.Resolve(`{"message":"Just test", "createTime":"2009-11-10T23:00:00Z", "id": "1", "type": "EntityCreatedEvent", "version": 1}`)
+
+	event := e.(*EntityCreatedEvent)
 	provider := new(MockProvider)
-	provider.SetInitEvents([]cerk.Event{event})
+	provider.SetInitEvents([]goeh.Event{event})
 
 	repository := new(MockRepository)
 	repository.MemoryRepository = cerk.NewMemoryRepository()
@@ -115,16 +126,17 @@ func Test_InitProvider_And_Check_Generated_Entity(t *testing.T) {
 		t.Fatal("Cannot find Entity")
 	}
 
-	if entity.(*MockEntity).Message != "Just test" {
-		t.Fatalf("Entity has incorrect message - %s", entity.(*MockEntity).Message)
-	}
+	mappedEntity := entity.(*MockEntity)
+	assert.Equal(t, mappedEntity.Message, "Just test")
 }
 
 func Test_Save_Events(t *testing.T) {
 	event := &EntityCreatedEvent{
-		AggregatorId: "1",
-		Version:      1,
-		Payload:      `{"message":"Just test", "createTime":"2009-11-10T23:00:00Z"}`,
+		EventData: goeh.EventData{
+			ID:      "1",
+			Payload: `{"message":"Just test", "createTime":"2009-11-10T23:00:00Z", "id": "1", "type": "EntityCreatedEvent"}`,
+		},
+		Version: 1,
 	}
 
 	provider := new(MockProvider)
@@ -136,36 +148,12 @@ func Test_Save_Events(t *testing.T) {
 		t.Fatal(err.Error())
 	}
 
-	if err := repository.Save([]cerk.Event{event}); err != nil {
+	if err := repository.Save([]goeh.Event{event}); err != nil {
 		t.Fatal(err.Error())
 	}
 
 	if len(provider.Events) == 0 {
 		t.Fatal("Provider events shouldn't be empty")
-	}
-}
-
-func Test_Init_Event_By_Other_Event(t *testing.T) {
-	event := &EntityCreatedEvent{
-		AggregatorId: "1",
-		Version:      1,
-		Payload:      `{"message":"Just test", "createTime":"2009-11-10T23:00:00Z"}`,
-	}
-	if err := event.LoadPayload(); err != nil {
-		t.Fatal(err)
-	}
-
-	eventToCompare := new(EntityCreatedEvent)
-	eventToCompare.InitBy(event)
-	if err := eventToCompare.LoadPayload(); err != nil {
-		t.Fatal(err)
-	}
-
-	if event.GetAggregatorId() != eventToCompare.GetAggregatorId() {
-		t.Fatal("Events have different ids")
-	}
-	if event.Message != eventToCompare.Message {
-		t.Fatal("Events have different messages")
 	}
 }
 

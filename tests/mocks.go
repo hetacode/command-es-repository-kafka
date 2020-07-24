@@ -1,88 +1,49 @@
 package test
 
 import (
-	"encoding/json"
-	"time"
-
 	cerk "github.com/hetacode/command-es-repository-kafka"
+	goeh "github.com/hetacode/go-eh"
 )
 
+// EntityCreatedEvent ...
 type EntityCreatedEvent struct {
-	AggregatorId string
-	CreateTime   string
-	Version      int32
-	Payload      string
-
-	Message string
+	goeh.EventData
+	CreateTime string `json:"createTime"`
+	Version    int32  `json:"version"`
+	Message    string `json:"message"`
 }
 
+// GetType ...
 func (e *EntityCreatedEvent) GetType() string {
 	return "EntityCreatedEvent"
 }
-func (e *EntityCreatedEvent) GetAggregatorId() string {
-	return e.AggregatorId
-}
-func (e *EntityCreatedEvent) GetCreateTime() time.Time {
-	value, _ := time.Parse(time.RFC3339, e.CreateTime)
-	return value
-}
-func (e *EntityCreatedEvent) GetVersion() int32 {
-	return e.Version
-}
-func (e *EntityCreatedEvent) GetPayload() string {
-	return e.Payload
-}
-func (e *EntityCreatedEvent) LoadPayload() error {
-	var jsonMap map[string]interface{}
-	bytesData := []byte(e.Payload)
-	if err := json.Unmarshal(bytesData, &jsonMap); err != nil {
-		return err
-	}
-	e.CreateTime = jsonMap["createTime"].(string)
-	e.Message = jsonMap["message"].(string)
 
-	return nil
-}
-func (e *EntityCreatedEvent) SavePayload() error {
-	toJson := map[string]interface{}{
-		"createTime": e.CreateTime,
-		"message":    e.Message,
-	}
-	bytesData, err := json.Marshal(toJson)
-	if err != nil {
-		return err
-	}
-	e.Payload = string(bytesData)
-	return nil
-}
-
-func (e *EntityCreatedEvent) InitBy(event cerk.Event) {
-	e.Payload = event.GetPayload()
-	e.AggregatorId = event.GetAggregatorId()
-	e.Version = event.GetVersion()
-}
-
+// MockEntity ,,,
 type MockEntity struct {
-	Id string
+	ID string
 
 	Message string
 }
 
+// GetId ...
 func (e *MockEntity) GetId() string {
-	return e.Id
+	return e.ID
 }
 
+// MockProvider ...
 type MockProvider struct {
-	Events     []cerk.Event
-	initEvents []cerk.Event
+	Events     []goeh.Event
+	initEvents []goeh.Event
 }
 
-func (p *MockProvider) SetInitEvents(events []cerk.Event) {
+// SetInitEvents ...
+func (p *MockProvider) SetInitEvents(events []goeh.Event) {
 	p.initEvents = events
 }
 
-func (p *MockProvider) FetchAllEvents(batch int) (<-chan []cerk.Event, error) {
-	c := make(chan []cerk.Event)
+// FetchAllEvents ...
+func (p *MockProvider) FetchAllEvents(batch int) (<-chan []goeh.Event, error) {
+	c := make(chan []goeh.Event)
 	go func() {
 		c <- p.initEvents
 		close(c)
@@ -90,26 +51,30 @@ func (p *MockProvider) FetchAllEvents(batch int) (<-chan []cerk.Event, error) {
 	return c, nil
 }
 
-func (p *MockProvider) SendEvents(events []cerk.Event) error {
+// SendEvents ...
+func (p *MockProvider) SendEvents(events []goeh.Event) error {
 	p.Events = events
 	return nil
 }
 
+// Close ...
 func (p *MockProvider) Close() {
 
 }
 
+// MockRepository ...
 type MockRepository struct {
 	*cerk.MemoryRepository
 }
 
-func (r *MockRepository) Replay(events []cerk.Event) error {
+// Replay ...
+func (r *MockRepository) Replay(events []goeh.Event) error {
 	for _, e := range events {
 		e.LoadPayload()
 		switch e.GetType() {
 		case "EntityCreatedEvent":
 			entity := new(MockEntity)
-			entity.Id = e.GetAggregatorId()
+			entity.ID = e.GetID()
 			entity.Message = e.(*EntityCreatedEvent).Message
 			r.AddOrModifyEntity(entity)
 		}
@@ -118,11 +83,14 @@ func (r *MockRepository) Replay(events []cerk.Event) error {
 	return nil
 }
 
+// CreateFakeEvent
 func (r *MockRepository) CreateFakeEvent() {
 	event := &EntityCreatedEvent{
-		AggregatorId: "1",
-		Version:      1,
-		Payload:      `{"message":"fake", "createTime":"2009-11-10T23:00:00Z"}`,
+		EventData:  goeh.EventData{ID: "1"},
+		Version:    1,
+		Message:    "fake",
+		CreateTime: "2009-11-10T23:00:00Z",
 	}
+	event.SavePayload(event)
 	r.AddNewEvent(event)
 }
